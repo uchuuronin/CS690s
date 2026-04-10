@@ -63,7 +63,7 @@ def is_valid_trajectory(answer_data: dict) -> bool:
 def load_from_local(data_root: Path, group: str, categories: list[str], target_expert: int, target_held_out: int, target_suboptimal: int, threshold: float):
     answer_dir = data_root / "answer" / f"{group}_answer"
     if not answer_dir.exists():
-        raise FileNotFoundError(f"Answer directory not found: {answer_dir}\nDownload ToolBench data by running fetch_data.sh")
+        raise FileNotFoundError(f"Answer directory not found: {answer_dir}\nDownload ToolBench data locally first")
 
     #load instruction file for query text
     instr_file = data_root / "instruction" / f"{group}_query.json"
@@ -181,6 +181,8 @@ def main(data_root, group, target_expert, target_held_out, threshold):
     print(f"data/expert_trajectories.json ({len(expert)})")
     print(f"data/held_out_trajectories.json ({len(held_out)}, mixed quality)")
     print(f"data/suboptimal_trajectories.json ({len(suboptimal)}, for IRL model dist.)")
+    print("\ndata filtering done.")
+    
  
  
 if __name__ == "__main__":
