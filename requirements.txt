@@ -1,0 +1,12 @@
+#For gpu training
+# pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/rocm6.1
+numpy
+scipy
+tqdm
+datasets
+torch
+transformers
+peft
+trl
+accelerate
+bitsandbytes
