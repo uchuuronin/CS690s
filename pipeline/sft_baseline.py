@@ -33,7 +33,6 @@ def format_trajectory(traj: dict) -> str:
         parts.append(f"[ANSWER] {traj['final_answer'][:500]}")
     return "\n".join(parts)
 
-
 def main():
     with open(DATA_DIR / "expert_parsed.json") as f:
         expert = json.load(f)
@@ -49,7 +48,7 @@ def main():
             has_gpu = False
 
     if not has_gpu:
-        print("no GPU — saving config")
+        print("no GPU. saving config")
         with open(MODEL_DIR / "training_config.json", "w") as f:
             json.dump({
                 "base_model": BASE_MODEL, "train_args": SFT_ARGS,

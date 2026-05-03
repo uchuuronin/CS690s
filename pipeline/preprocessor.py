@@ -1,6 +1,5 @@
 """
-Inspired by: ToolLLM (Qin et al., ICLR 2024) — ToolBench dataset and DFSDT trajectory format.
-
+Inspired by: ToolLLM (Qin et al., ICLR 2024). ToolBench dataset and DFSDT trajectory format.
 
 Filters ToolBench into expert / held-out / suboptimal splits using finish_type
 as a binary pass-rate proxy (give_answer=1.0, give_up_and_restart=0.0).
@@ -121,8 +120,7 @@ def extract_dfsdt_branches(raw: dict, query_id: str, query: str, category: str, 
     return branches
 
 
-def load_from_local(data_root: Path, group: str, target_expert: int,
-                    target_held_out: int, target_suboptimal: int, threshold: float):
+def load_from_local(data_root: Path, group: str, target_expert: int, target_held_out: int, target_suboptimal: int, threshold: float):
     answer_dir = data_root / "answer" / f"{group}_answer"
     if not answer_dir.exists():
         raise FileNotFoundError(f"Answer directory not found: {answer_dir}")
@@ -148,7 +146,6 @@ def load_from_local(data_root: Path, group: str, target_expert: int,
            len(held_out) >= target_held_out * 3 and \
            len(suboptimal) >= target_suboptimal:
             break
-
         try:
             with open(fpath) as f:
                 raw = json.load(f)
@@ -174,8 +171,7 @@ def load_from_local(data_root: Path, group: str, target_expert: int,
         pr = compute_pass_rate(raw)
         by_category[category] += 1
 
-        branches = extract_dfsdt_branches({**raw, "answer_generation": ag},
-                                          query_id, query, category, group)
+        branches = extract_dfsdt_branches({**raw, "answer_generation": ag}, query_id, query, category, group)
         main_traj = branches[0]
 
         if pr >= threshold:
@@ -202,7 +198,6 @@ def load_from_local(data_root: Path, group: str, target_expert: int,
 def main(data_root, group, target_expert, target_held_out, threshold):
     target_suboptimal = target_expert * 2
     data_root = Path(data_root) if data_root else DATA_DIR
-
     print(f"group={group} expert={target_expert} held_out={target_held_out} suboptimal={target_suboptimal} threshold={threshold}")
 
     expert, held_out, suboptimal, by_category = load_from_local(
@@ -212,9 +207,8 @@ def main(data_root, group, target_expert, target_held_out, threshold):
     random.shuffle(expert); expert = expert[:target_expert]
     random.shuffle(held_out); held_out = held_out[:target_held_out]
     random.shuffle(suboptimal); suboptimal = suboptimal[:target_suboptimal]
-
     if len(expert) < 50:
-        print(f"WARNING: only {len(expert)} expert trajectories — try lowering --pass-rate or switching --group")
+        print(f"WARNING: only {len(expert)} expert trajectories. try lowering --pass-rate or switching --group")
 
     with open(DATA_DIR / "expert_trajectories.json", "w") as f:
         json.dump(expert, f, indent=2)
@@ -225,7 +219,6 @@ def main(data_root, group, target_expert, target_held_out, threshold):
 
     print(f"expert={len(expert)} held_out={len(held_out)} suboptimal={len(suboptimal)}")
     print(f"by_category={by_category}")
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

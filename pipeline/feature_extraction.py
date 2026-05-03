@@ -1,12 +1,11 @@
 """
-Computes an 11-dimensional feature vector φ(τ) per trajectory (8 quality + 3 decoy).
+Computes an 11-dimensional feature vector per trajectory (8 quality + 3 decoy).
 All features normalised to [0, 1].
 """
 
 import json
 import re
 from pathlib import Path
-
 import numpy as np
 from scipy import stats
 
@@ -135,7 +134,7 @@ def _parse_tool_output(output: str) -> dict:
             n_results = len(parsed)
             response_text = json.dumps(parsed[:3])  # first 3 items for context
     except Exception:
-        # Not JSON — use raw text, cap at meaningful length
+        # not JSON: use raw text, cap at meaningful length
         response_text = output[:300] if not is_error else ""
         error_msg = output[:100] if is_error else ""
 
@@ -256,11 +255,7 @@ def f4_constraint_adherence(traj: dict) -> float:
 
 
 def f5_call_success_rate(traj: dict) -> float:
-    """
-    Fraction of tool calls with a successful, non-empty response.
-    Replaces info_sufficiency (ρ=−0.22 inverted correlation): failed DFSDT
-    trajectories accumulate more calls, inflating keyword-based sufficiency scores.
-    """
+    # Fraction of tool calls with a successful, non-empty response.
     result_steps = [s for s in traj["steps"]
                     if s["role"] in ("tool", "function", "observation")
                     and s.get("tool_output") is not None]
@@ -274,10 +269,7 @@ def f5_call_success_rate(traj: dict) -> float:
 
 
 def f6_arg_completeness(traj: dict) -> float:
-    """
-    Fraction of tool calls with at least one non-trivial argument value.
-    Replaces invasiveness_minimisation (mean≈0.995, near-zero variance on benign ToolBench tasks).
-    """
+    # Fraction of tool calls with at least one non-trivial argument value.
     tool_steps = [s for s in traj["steps"]
                   if s["role"] == "assistant" and s["tool_name"]
                   and s["tool_name"].lower() not in _PSEUDO_TOOLS]
@@ -299,11 +291,11 @@ def f7_efficiency(traj: dict) -> float:
     return max(0.0, 1.0 - abs(n_calls / expected - 1.0) * 0.3)
 
 
-# Decoys — surface-level properties with no expected causal link to quality.
-# If IRL assigns them substantial weight, θ is unreliable.
+# Decoys: surface-level properties with no expected causal link to quality.
+# Large theta on any decoy means unreliable recovery.
 
 def f8_response_verbosity(traj: dict) -> float:
-    """Query character length, set before agent acts — should not predict quality."""
+    # Query character length, set before agent acts. Should not predict quality.
     return min(1.0, len(traj.get("query", "")) / 500)
 
 
@@ -408,7 +400,7 @@ def main():
             "collinearity_condition_number": cond_number,
         }
         if cond_number and cond_number > 30:
-            print(f"WARNING ({split}): high collinearity (condition number={cond_number:.1f}), θ may be poorly identified")
+            print(f"WARNING ({split}): high collinearity (condition number={cond_number:.1f}), theta may be poorly identified")
 
         with open(out_path, "w") as f:
             json.dump(results, f, indent=2)

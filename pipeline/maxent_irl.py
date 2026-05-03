@@ -51,16 +51,18 @@ def build_dfsdt_pairs(expert_data: list[dict], subopt_data: list[dict]) -> tuple
 def fit_scaler(features: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     mu = features.mean(axis=0)
     sigma = features.std(axis=0)
-    sigma[sigma < 1e-8] = 1.0
+    sigma[sigma < 1e-8] = 1.0  # leave constant features unscaled
     return mu, sigma
 
 def standardise(X: np.ndarray, mu: np.ndarray, sigma: np.ndarray) -> np.ndarray:
     return (X - mu) / sigma
 
 def unstandardise_theta(theta_std: np.ndarray, sigma: np.ndarray) -> np.ndarray:
+    # theta_orig . phi_orig == theta_std . phi_std (mean shift cancels in rankings)
     return theta_std / sigma
 
 def pool_importance_weights(n_expert: int, n_subopt: int) -> np.ndarray:
+    # correct for 1:2 expert:suboptimal pool imbalance in mu_theta
     n_total = n_expert + n_subopt
     w = np.empty(n_total)
     w[:n_expert] = (n_total / n_expert) / n_total
@@ -74,14 +76,7 @@ def _softmax_weighted(theta: np.ndarray, features: np.ndarray, weights: np.ndarr
     p = weights * np.exp(logits)
     return p / p.sum()
 
-def maxent_irl(
-    expert_std: np.ndarray,
-    all_std: np.ndarray,
-    is_weights: np.ndarray,
-    lr: float,
-    l2: float,
-    n_iters: int,
-) -> tuple[np.ndarray, list[dict]]:
+def maxent_irl(expert_std: np.ndarray,all_std: np.ndarray,is_weights: np.ndarray, lr: float,l2: float,n_iters: int,) -> tuple[np.ndarray, list[dict]]:
     mu_E = expert_std.mean(axis=0)
     theta = np.zeros(N_FEATURES)
     log = []
@@ -94,12 +89,12 @@ def maxent_irl(
 
         if t % IRL_LOG_EVERY == 0 or t == n_iters - 1:
             mu_gap = float(np.linalg.norm(mu_E - mu_theta))
-            print(f"[maxent] iter={t:4d} |mu_E-mu_θ|={mu_gap:.5f} |grad|={np.linalg.norm(grad):.5f}")
+            print(f"[maxent] iter={t:4d} |mu_E-mu_theta|={mu_gap:.5f} |grad|={np.linalg.norm(grad):.5f}")
             log.append({"iter": t, "mu_gap": mu_gap, "grad_norm": float(np.linalg.norm(grad)), "theta": theta.tolist()})
     return theta, log
 
 
-def bt_irl(phi_w_std: np.ndarray,phi_l_std: np.ndarray,lr: float,l2: float,n_iters: int) -> tuple[np.ndarray, list[dict]]:
+def bt_irl(phi_w_std: np.ndarray,phi_l_std: np.ndarray,lr: float,l2: float,n_iters: int,) -> tuple[np.ndarray, list[dict]]:
     delta = phi_w_std - phi_l_std
     theta = np.zeros(N_FEATURES)
     log = []
@@ -114,7 +109,6 @@ def bt_irl(phi_w_std: np.ndarray,phi_l_std: np.ndarray,lr: float,l2: float,n_ite
             print(f"[bt]     iter={t:4d} logL={log_lik:.4f} pair_acc={pair_acc:.4f} |grad|={np.linalg.norm(grad):.5f}")
             log.append({"iter": t, "log_likelihood": log_lik, "pair_accuracy": pair_acc, "grad_norm": float(np.linalg.norm(grad)), "theta": theta.tolist()})
     return theta, log
-
 
 def pairwise_ranking_check(theta: np.ndarray, pair_delta: float) -> dict:
     held_out = _load("held_out")
@@ -155,7 +149,7 @@ def pairwise_ranking_check(theta: np.ndarray, pair_delta: float) -> dict:
         rho, rho_p = stats.spearmanr(predicted, pass_rates)
         tau, tau_p, rho, rho_p = float(tau), float(tau_p), float(rho), float(rho_p)
 
-    print(f"cross_quality: {n_cross} pairs, acc={cross_acc:.4f} (random=0.50, target≥0.65)")
+    print(f"cross_quality: {n_cross} pairs, acc={cross_acc:.4f} (random=0.50, target 0.65+)")
     print(f"within_success: {within_pairs} pairs, acc={within_acc:.4f}")
     print(f"kendall_tau={tau}  spearman_rho={rho}")
 
@@ -225,7 +219,7 @@ def main(lr, l2, n_iters, pair_delta, reward_source):
         sanity_me = pairwise_ranking_check(theta_me, pair_delta)
     except FileNotFoundError:
         sanity_me = {}
-    out_me = _save(theta_me, log_me, sanity_me, len(expert_data), len(subopt_data), all_orig,is_weights,
+    out_me = _save(theta_me, log_me, sanity_me, len(expert_data), len(subopt_data), all_orig, is_weights,
                    mu_E_orig, "maxent", {"lr": lr, "l2": l2, "n_iters": n_iters, "is_weighted": True}, mu, sigma)
 
     phi_w_orig, phi_l_orig = build_dfsdt_pairs(expert_data, subopt_data)
@@ -233,7 +227,7 @@ def main(lr, l2, n_iters, pair_delta, reward_source):
     print(f"\nBT IRL ({n_pairs} query-matched pairs, {n_iters} iters)...")
 
     if n_pairs == 0:
-        print("WARNING: no query-matched pairs; check suboptimal id format (_branch_ suffix)")
+        print("WARNING: no query-matched pairs. check suboptimal id format (_branch_ suffix)")
         out_bt = {**out_me, "method": "bt_skipped"}
     else:
         phi_w_std = standardise(phi_w_orig, mu, sigma)
@@ -244,7 +238,7 @@ def main(lr, l2, n_iters, pair_delta, reward_source):
             sanity_bt = pairwise_ranking_check(theta_bt, pair_delta)
         except FileNotFoundError:
             sanity_bt = {}
-        out_bt = _save(theta_bt, log_bt, sanity_bt, len(expert_data), n_pairs, None, None, mu_E_orig, 
+        out_bt = _save(theta_bt, log_bt, sanity_bt, len(expert_data), n_pairs,None, None, mu_E_orig, 
                        "bt", {"lr": lr, "l2": l2, "n_iters": n_iters, "n_pairs": n_pairs}, mu, sigma)
 
     corr, _ = stats.spearmanr(theta_me, np.array(out_bt["theta"]))
@@ -254,7 +248,7 @@ def main(lr, l2, n_iters, pair_delta, reward_source):
             "maxent_ranking": out_me["feature_ranking"],
             "bt_ranking": out_bt["feature_ranking"],
         }, f, indent=2)
-    print(f"\nθ agreement (MaxEnt vs BT): Spearman ρ={corr:.4f}")
+    print(f"\ntheta agreement (MaxEnt vs BT): Spearman rho={corr:.4f}")
 
     chosen = out_me if reward_source == "maxent" else out_bt
     with open(OUTPUT_DIR / "theta_weights.json", "w") as f:

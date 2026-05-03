@@ -75,7 +75,6 @@ def parse_completion_to_pseudo_traj(prompt: str, completion: str) -> dict:
             steps.append({"step_idx": step_idx, "role": "tool",
                           "tool_name": None, "tool_args": None, "tool_output": output[:300]})
             step_idx += 1
-
     answer_match = re.search(r"\[ANSWER\]\s*(.*?)$", completion, re.DOTALL)
     final_answer = answer_match.group(1).strip() if answer_match else None
     tool_names = [s["tool_name"] for s in steps if s["role"] == "assistant" and s["tool_name"]]
@@ -89,13 +88,11 @@ def parse_completion_to_pseudo_traj(prompt: str, completion: str) -> dict:
         "api_list": [],
     }
 
-
 def make_binary_reward_fn():
     def reward_fn(completions, **kwargs):
         return [1.0 if "[ANSWER]" in (c if isinstance(c, str) else c[0].get("content", ""))
                 else 0.0 for c in completions]
     return reward_fn
-
 
 def make_toolrl_reward_fn():
     w = TOOLRL_WEIGHTS
@@ -130,7 +127,6 @@ def make_toolrl_reward_fn():
         return rewards
     return reward_fn
 
-
 def make_irl_reward_fn(theta: np.ndarray):
     r_min, r_max = IRL_REWARD_CLIP
     compute_features = _load_feature_module().compute_features
@@ -146,12 +142,10 @@ def make_irl_reward_fn(theta: np.ndarray):
         return rewards
     return reward_fn
 
-
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--condition", choices=["binary", "toolrl", "irl"], default="binary")
     args = parser.parse_args()
-
     output_dir = MODELS_DIR / args.condition
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -168,7 +162,7 @@ def main():
             has_gpu = False
 
     if not has_gpu:
-        print("no GPU — saving config")
+        print("no GPU. saving config")
         with open(output_dir / "training_config.json", "w") as f:
             json.dump({"condition": args.condition, "base_model": BASE_MODEL,
                        "grpo_args": GRPO_ARGS, "n_train_examples": len(prompts)}, f, indent=2)
@@ -179,7 +173,6 @@ def main():
     tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL)
     tokenizer.pad_token = tokenizer.eos_token
     model = AutoModelForCausalLM.from_pretrained(BASE_MODEL, dtype=torch.bfloat16, device_map="auto")
-
     if args.condition == "binary":
         reward_fn = make_binary_reward_fn()
     elif args.condition == "toolrl":
@@ -213,7 +206,6 @@ def main():
     with open(output_dir / "training_log.json", "w") as f:
         json.dump(log, f, indent=2)
     print(f"model saved to {output_dir}")
-
 
 if __name__ == "__main__":
     main()

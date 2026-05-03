@@ -1,6 +1,4 @@
 """
-Inspired by: Qian et al. "ToolRL: Reward is All Tool Learning Needs." NeurIPS 2025.
-
 Reward functions for GRPO training: binary, ToolRL-style, and IRL-recovered.
 """
 
@@ -53,7 +51,7 @@ def load_theta() -> np.ndarray:
         if candidate.exists():
             with open(candidate) as f:
                 return np.array(json.load(f)["theta"])
-    raise FileNotFoundError("theta_weights.json not found; run maxent_irl.py first")
+    raise FileNotFoundError("theta_weights.json not found. run maxent_irl.py first")
 
 def irl_reward(traj: dict, theta: np.ndarray | None = None) -> float:
     if theta is None:
@@ -83,11 +81,11 @@ def stats_for(arr):
 def compute_reward_stats(expert: list[dict]) -> dict:
     # Saves reward distribution stats and inter-signal correlations to output/reward_stats.json.
     theta = load_theta()
-
     b = np.array([binary_reward(t) for t in expert])
     h = np.array([toolrl_reward(t) for t in expert])
     irl_raw = np.array([irl_reward(t, theta) for t in expert])
     irl_norm = np.array([irl_reward_normalised(t, theta) for t in expert])
+
     result = {
         "binary": stats_for(b),
         "toolrl": stats_for(h),
@@ -103,5 +101,5 @@ if __name__ == "__main__":
     with open(DATA_DIR / "expert_parsed.json") as f:
         expert = json.load(f)
     stats = compute_reward_stats(expert)
-    print(f"reward stats saved to {OUTPUT_DIR}/reward_stats.json")
-    print(f"toolrl_vs_irl = {stats['correlations']['toolrl_vs_irl']:.4f}")
+    print(f"reward stats saved to output/reward_stats.json")
+    print(f"toolrl_vs_irl rho = {stats['correlations']['toolrl_vs_irl']:.4f}")

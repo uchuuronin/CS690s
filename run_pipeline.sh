@@ -9,27 +9,29 @@ ONLY_IRL=false
 IRL_LR=0.05; IRL_L2=0.01; IRL_ITERS=500; IRL_PAIR_DELTA=0.15
 N_EXPERT=300; N_HELD_OUT=80; PASS_RATE=0.8
 DATA_ROOT="data"; GROUP="G1"
+REWARD_SOURCE="maxent"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --gpu)            GPU_MODE=true ;;
-    --condition)      CONDITION="$2"; shift ;;
-    --skip-download)  SKIP_DOWNLOAD=true ;;
-    --skip-parse)     SKIP_PARSE=true ;;
-    --skip-features)  SKIP_FEATURES=true ;;
-    --skip-irl)       SKIP_IRL=true ;;
-    --skip-sft)       SKIP_SFT=true ;;
-    --only-irl)       ONLY_IRL=true ;;
-    --lr)             IRL_LR="$2"; shift ;;
-    --l2)             IRL_L2="$2"; shift ;;
-    --iters)          IRL_ITERS="$2"; shift ;;
-    --pair-delta)     IRL_PAIR_DELTA="$2"; shift ;;
-    --n-expert)       N_EXPERT="$2"; shift ;;
-    --n-held-out)     N_HELD_OUT="$2"; shift ;;
-    --pass-rate)      PASS_RATE="$2"; shift ;;
-    --data-root)      DATA_ROOT="$2"; shift ;;
-    --group)          GROUP="$2"; shift ;;
-    --help|-h)        grep "^#" "$0" | head -30 | sed 's/^# \?//'; exit 0 ;;
+    --gpu) GPU_MODE=true ;;
+    --condition) CONDITION="$2"; shift ;;
+    --skip-download) SKIP_DOWNLOAD=true ;;
+    --skip-parse) SKIP_PARSE=true ;;
+    --skip-features) SKIP_FEATURES=true ;;
+    --skip-irl) SKIP_IRL=true ;;
+    --skip-sft) SKIP_SFT=true ;;
+    --only-irl) ONLY_IRL=true ;;
+    --lr) IRL_LR="$2"; shift ;;
+    --l2) IRL_L2="$2"; shift ;;
+    --iters) IRL_ITERS="$2"; shift ;;
+    --pair-delta) IRL_PAIR_DELTA="$2"; shift ;;
+    --n-expert) N_EXPERT="$2"; shift ;;
+    --n-held-out) N_HELD_OUT="$2"; shift ;;
+    --pass-rate) PASS_RATE="$2"; shift ;;
+    --data-root) DATA_ROOT="$2"; shift ;;
+    --group) GROUP="$2"; shift ;;
+    --reward-source) REWARD_SOURCE="$2"; shift ;;
+    --help|-h) grep "^#" "$0" | head -30 | sed 's/^# \?//'; exit 0 ;;
     *) echo "unknown flag: $1"; exit 1 ;;
   esac
   shift
@@ -52,11 +54,11 @@ else
     --n-expert "$N_EXPERT" --n-held-out "$N_HELD_OUT" --pass-rate "$PASS_RATE"
 fi
 
-$SKIP_PARSE    && echo "[2] skipping parse" || { echo "[2] parsing trajectories..."; python pipeline/parse_trajectories.py; }
+$SKIP_PARSE && echo "[2] skipping parse" || { echo "[2] parsing trajectories..."; python pipeline/parse_trajectories.py; }
 $SKIP_FEATURES && echo "[3] skipping features" || { echo "[3] extracting features..."; python pipeline/feature_extraction.py; }
-$SKIP_IRL      && echo "[4] skipping IRL" || {
+$SKIP_IRL && echo "[4] skipping IRL" || {
   echo "[4] running MaxEnt IRL..."
-  python pipeline/maxent_irl.py --lr "$IRL_LR" --l2 "$IRL_L2" --iters "$IRL_ITERS" --pair-delta "$IRL_PAIR_DELTA"
+  python pipeline/maxent_irl.py --lr "$IRL_LR" --l2 "$IRL_L2" --iters "$IRL_ITERS" --pair-delta "$IRL_PAIR_DELTA" --reward-source "$REWARD_SOURCE"
 }
 
 echo "[5] reward stats..."
