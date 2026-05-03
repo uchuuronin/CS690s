@@ -1,139 +1,120 @@
 # MaxEnt IRL Tool-Use Rewards
 
-CS 690S Final Project — recovering implicit tool-use reward functions via Maximum Entropy IRL from ToolBench expert demonstrations, then training an LLM agent (Llama-3-8B + LoRA) via GRPO against the learned reward.
+CS 690S Final Project. Recovers implicit tool-use reward functions via Maximum Entropy IRL from ToolBench expert demonstrations, then trains an LLM agent via GRPO against the learned reward.
 
 ## Structure
 
 ```
-run_pipeline.sh       Master runner — start here
-README.md
+run_pipeline.sh
 
 pipeline/
-  preprocessor.py         Filter ToolBench into expert / held-out / suboptimal sets
-  02_parse_trajectories.py    Parse raw JSON into structured step format (all three splits)
-  03_feature_extraction.py    Compute 8-dim φ(τ) feature vectors (all three splits)
-  04_maxent_irl.py            MaxEnt IRL — recover θ using real suboptimal trajectories as model dist.
-  05_sft_baseline.py          SFT baseline (Llama-3-8B + LoRA)
-  06_reward_functions.py      All three reward functions + distribution report
-  07_grpo_train.py            GRPO training (--condition binary/toolrl/irl)
+  preprocessor.py        filter ToolBench into expert / held-out / suboptimal sets
+  parse_trajectories.py  parse raw JSON into structured step format
+  feature_extraction.py  compute 11-dim feature vectors (8 quality + 3 decoy)
+  maxent_irl.py          MaxEnt IRL and BT IRL, recover theta
+  sft_baseline.py        SFT baseline (LoRA)
+  reward_functions.py    binary / ToolRL / IRL reward functions
+  grpo_train.py          GRPO training (--condition binary/toolrl/irl)
+  config.py              all knobs
 
-data/                         All trajectory files (auto-created by pipeline)
-  expert_trajectories.json    Raw expert trajectories (pass_rate >= threshold)
-  held_out_trajectories.json  Raw held-out trajectories (varied pass_rate)
-  suboptimal_trajectories.json  Real failed/partial ToolBench trajectories (model dist. for IRL)
-  *_parsed.json               Structured step-level format
-  *_features.json             8-dim φ(τ) vectors
+data/
+  expert_trajectories.json
+  held_out_trajectories.json
+  suboptimal_trajectories.json
+  *_parsed.json
+  *_features.json
 
-output/                       Results (auto-created)
-  filter_report.json          Trajectory counts and filtering stats
-  feature_report.json         Per-feature stats + ToolEval correlation
-  theta_weights.json          Recovered θ weights  ← main IRL result
-  irl_training_log.json       Log-likelihood + feature matching gap per iteration
-  sanity_check.json           Pairwise ranking accuracy on held-out
+output/
+  feature_report.json
+  theta_maxent.json           MaxEnt IRL theta weights
+  theta_bt.json               BT IRL theta weights
+  theta_weights.json          canonical theta for GRPO
+  theta_comparison.json       Spearman rho between MaxEnt and BT theta
+  irl_training_log_maxent.json
+  irl_training_log_bt.json
+  sanity_check.json
+  reward_stats.json
 
-models/                       Trained LoRA adapters (GPU stages only)
+models/
   sft/  binary/  toolrl/  irl/
 ```
 
-## Before you start — download the data
+## Data
 
-ToolBench must be downloaded manually (automated download is unreliable due to Google Drive quota limits):
-
-1. Go to: https://drive.google.com/drive/folders/1TysbSWYpP8EioFu9xPJtpbJZMLLmwAmL
-2. Download `data.zip`
-3. Unzip into the project root so the structure is `data/answer/`, `data/instruction/`, `data/toolenv/`, etc.
-
-**Windows (PowerShell):**
-```powershell
-Expand-Archive -Path "$env:USERPROFILE\Downloads\data.zip" -DestinationPath data
-```
-
-**Linux / macOS:**
-```bash
-unzip ~/Downloads/data.zip -d data
-```
-
-Verify: `ls data/` should show `answer/  instruction/  toolenv/  ...`
+ToolBench must be downloaded manually. Go to https://drive.google.com/drive/folders/1TysbSWYpP8EioFu9xPJtpbJZMLLmwAmL, download `data.zip`, and unzip into the project root so `data/answer/`, `data/instruction/`, and `data/toolenv/` exist.
 
 ## Quickstart
 
-**Local (no GPU) — stages 1–4:**
 ```bash
-bash run_pipeline.sh
-```
+# stages 1-4 only, no GPU needed
+bash run_pipeline.sh --only-irl
 
-**AMD cloud — full pipeline including training:**
-```bash
+# full pipeline
 bash run_pipeline.sh --gpu --condition all
-```
 
-**Re-run IRL only with different hyperparameters:**
-```bash
+# re-run IRL with different hyperparameters
 bash run_pipeline.sh --skip-download --skip-parse --skip-features \
                      --lr 0.01 --l2 0.001 --iters 1000
+
+# use BT theta for GRPO instead of MaxEnt
+bash run_pipeline.sh --gpu --reward-source bt
 ```
 
-## All flags
+## Flags
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--gpu` | off | Enable SFT + GRPO training stages |
+| `--gpu` | off | enable SFT + GRPO training |
 | `--condition` | `all` | GRPO reward: `binary`, `toolrl`, `irl`, or `all` |
-| `--skip-download` | off | Skip Stage 1 |
-| `--skip-parse` | off | Skip Stage 2 |
-| `--skip-features` | off | Skip Stage 3 |
-| `--skip-irl` | off | Skip Stage 4 |
-| `--skip-sft` | off | Skip SFT baseline |
-| `--only-irl` | off | Stages 1–4 only, no training |
+| `--reward-source` | `maxent` | which theta to write to `theta_weights.json`: `maxent` or `bt` |
+| `--skip-download` | off | skip stage 1 |
+| `--skip-parse` | off | skip stage 2 |
+| `--skip-features` | off | skip stage 3 |
+| `--skip-irl` | off | skip stage 4 |
+| `--skip-sft` | off | skip SFT baseline |
+| `--only-irl` | off | stages 1-4 only, no training |
 | `--lr` | `0.05` | IRL learning rate |
 | `--l2` | `0.01` | IRL L2 regularisation |
 | `--iters` | `500` | IRL gradient ascent iterations |
-| `--pair-delta` | `0.15` | Min pass_rate gap to count as a clear ranking pair in sanity check |
-| `--n-expert` | `300` | Expert trajectory count |
-| `--n-held-out` | `80` | Held-out trajectory count |
-| `--pass-rate` | `0.8` | Expert quality threshold; trajectories below this → suboptimal set |
+| `--pair-delta` | `0.15` | min pass_rate gap for ranking sanity check |
+| `--n-expert` | `300` | expert trajectory count |
+| `--n-held-out` | `80` | held-out trajectory count |
+| `--pass-rate` | `0.8` | expert quality threshold; below this goes to suboptimal set |
+| `--data-root` | `data/` | path to ToolBench data |
+| `--group` | `G1` | G1 (single-tool), G2, or G3 |
 
-## IRL design notes
+## IRL
 
-### Model distribution
-MaxEnt IRL requires a contrast between expert demonstrations and a model
-distribution p(τ|θ). Stage 1 collects real ToolBench trajectories that fell
-below the pass_rate threshold — genuine failed or partial agent behaviour from
-ToolBench's DFSDT search tree. These form the model distribution, not synthetic
-perturbations. Target: ~2× expert count (~600 trajectories).
+Both objectives recover a log-linear reward R = theta . phi(tau).
 
-### Gradient
-At each iteration: ∇L = μ_E − μ_θ − 2λθ  
-where μ_E is the fixed expert feature expectation and μ_θ is recomputed each
-step from the softmax distribution over all 900 trajectories.
+**MaxEnt.** Gradient ascent on log-likelihood of expert trajectories under a Boltzmann distribution over the full pool. The model feature expectation mu_theta is importance-weighted to correct for the 1:2 expert:suboptimal pool imbalance. Gradient: mu_E minus mu_theta_IS minus 2 * lambda * theta.
 
-### Sanity check
-Pairwise ranking accuracy on held-out: for each pair (τᵢ, τⱼ) where
-pass_rate(τᵢ) − pass_rate(τⱼ) > `--pair-delta`, check whether θᵀφ(τᵢ) > θᵀφ(τⱼ).
-Random baseline = 0.50. Target ≥ 0.65.
+**BT.** Logistic regression on query-matched (winner, loser) pairs from DFSDT search trees. Equivalent to MaxEnt IRL under Plackett-Luce (Zhu et al., ICML 2023), but uses query-matched pairs rather than a global pool. Gradient: mean over pairs of sigmoid(-delta) * (phi_w minus phi_l) minus 2 * lambda * theta.
 
-## Features (φ vector, dim=8)
+Both run every time. `theta_comparison.json` records Spearman rho between the two theta vectors. Features are standardised before IRL and theta is mapped back to original scale after.
 
-| # | Name | Type | What it measures |
-|---|------|------|-----------------|
-| 0 | `tool_selection_accuracy` | Explicit | Tool name relevant to query |
-| 1 | `arg_correctness` | Explicit | Args non-empty and well-formed |
-| 2 | `call_ordering` | **Implicit** | Info-gather before act |
-| 3 | `redundancy_avoidance` | **Implicit** | No repeated identical calls |
-| 4 | `constraint_adherence` | **Implicit** | Query constraints reflected in args |
-| 5 | `info_sufficiency` | **Implicit** | Enough info before final answer |
-| 6 | `invasiveness_minimisation` | **Implicit** | No unnecessary sensitive data |
-| 7 | `efficiency` | **Implicit** | Appropriate number of calls |
+## Features
 
-## Key outputs to share for midpoint report
+| Index | Name | Type |
+|-------|------|------|
+| 0 | `tool_selection_accuracy` | explicit |
+| 1 | `arg_correctness` | explicit |
+| 2 | `tool_diversity` | implicit |
+| 3 | `redundancy_avoidance` | implicit |
+| 4 | `constraint_adherence` | implicit |
+| 5 | `call_success_rate` | implicit |
+| 6 | `arg_completeness` | implicit |
+| 7 | `efficiency` | implicit |
+| 8 | `response_verbosity` | decoy |
+| 9 | `unique_tool_count` | decoy |
+| 10 | `trajectory_length_raw` | decoy |
 
-- `output/theta_weights.json` — θ weights, μ gap at convergence, hypothesis check
-- `output/feature_report.json` — per-feature stats and ToolEval correlation
-- `output/sanity_check.json` — pairwise ranking accuracy (target ≥ 0.65)
-- `output/irl_training_log.json` — convergence: log-likelihood and |μ_E − μ_θ| per iter
+Decoys (8-10) have no expected causal link to quality. Large theta on any decoy means unreliable recovery.
 
-**What to check on real ToolBench data:**
-1. θ: ≥ 2 implicit features (indices 2–7) with |θ| > 0.05
-2. Feature matching gap |μ_E − μ_θ| < 0.05 at convergence
-3. Pairwise ranking accuracy > 0.60 on held-out pairs
-4. IRL reward not perfectly correlated with ToolRL reward (ρ < 0.95 in reward report)
+## Key outputs
+
+- `theta_maxent.json` / `theta_bt.json`: recovered theta, feature ranking, hypothesis check, sanity check
+- `theta_comparison.json`: Spearman rho between MaxEnt and BT theta vectors
+- `feature_report.json`: per-feature stats and pass_rate correlation across splits
+- `sanity_check.json`: pairwise ranking accuracy on held-out (target 0.65+)
+- `reward_stats.json`: reward distributions and inter-signal correlations
