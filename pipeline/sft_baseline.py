@@ -93,6 +93,5 @@ def main():
         json.dump(log, f, indent=2)
     print(f"model saved to {MODEL_DIR}")
 
-
 if __name__ == "__main__":
     main()
