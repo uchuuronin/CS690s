@@ -1,24 +1,8 @@
 """
-Three analyses, all pure numpy, no GPU needed:
-
-  1. Leave-one-out feature ablation (8 runs).
-     Retrain IRL dropping one quality feature at a time.
-     Record cross-quality ranking accuracy per dropped feature.
-     Identifies which features are load-bearing vs fitting collinear noise.
-
+Three analyses
+  1. Leave-one-out feature ablation 
   2. BT vs MaxEnt theta comparison.
-     Already in theta_comparison.json from maxent_irl.py.
-     This script adds interpretation: which features flip rank between the two.
-
   3. Decoy stability check.
-     Retrain IRL once without the 3 decoy features.
-     Check whether theta on quality features shifts materially.
-     Large shift means collinearity with decoys was worse than L2 alone handles.
-
-Output:
-  output/ablation_loo.json         per-feature ranking accuracy when dropped
-  output/ablation_decoy.json       theta shift when decoys removed
-  output/theta_comparison_interp.json  which features disagree between MaxEnt and BT
 """
 
 import json
@@ -28,7 +12,7 @@ import numpy as np
 from scipy import stats
 
 import sys
-sys.path.insert(0, str(Path(__file__).parent / "pipeline"))
+sys.path.insert(0, str(Path(__file__).parent))
 from config import (
     DATA_DIR, OUTPUT_DIR,
     FEATURE_NAMES, N_FEATURES, QUALITY_FEATURE_IDX, DECOY_FEATURE_IDX,
