@@ -75,4 +75,10 @@ for C in $CONDITIONS; do
   python pipeline/grpo_train.py --condition "$C"
 done
 
+echo "[8] feature ablation and theta comparison..."
+python pipeline/ablation.py
+
+echo "[9] evaluation: inference + Mann-Whitney H2..."
+python pipeline/analysis.py
+
 echo "done."

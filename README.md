@@ -1,4 +1,4 @@
-# MaxEnt IRL Tool-Use Rewards
+# Learning What Users Actually Want: Reward Learning for Tool-Use Agents via IRL
 
 CS 690S Final Project. Recovers implicit tool-use reward functions via Maximum Entropy IRL from ToolBench expert demonstrations, then trains an LLM agent via GRPO against the learned reward.
 
