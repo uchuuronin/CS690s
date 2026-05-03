@@ -29,35 +29,140 @@ DEFAULT_GROUP = "G1"
 
 def compute_pass_rate(answer_data: dict) -> float:
     """
-    Using finish_type as a binary proxy where 
-        1= give_answer (agent produced a final answer) and 
-        0= give_up_and_restart (agent gave up)
+    Using finish_type as a binary proxy where
+        1 = give_answer (agent produced a final answer)
+        0 = give_up_and_restart (agent gave up)
+
+    ToolBench file structure (actual):
+      answer_generation.finish_type  — primary signal
+      win                            — top-level boolean, used as fallback
     """
-    answer =answer_data.get("answer", {})
-    if not isinstance(answer, dict):
-        return 0.0
-    finish =answer.get("finish_type", "")
-    if finish == "give_answer":
+    ag = answer_data.get("answer_generation", {})
+    if isinstance(ag, dict):
+        finish = ag.get("finish_type", "")
+        if finish == "give_answer":
+            return 1.0
+        elif finish == "give_up_and_restart":
+            return 0.0
+
+    # Fallback: top-level win flag
+    if answer_data.get("win") is True:
         return 1.0
-    elif finish == "give_up_and_restart":
+    if answer_data.get("win") is False:
         return 0.0
-    else:
-        return 0.5 # partial/unknown
+
+    return 0.5  # unknown
 
 
 def is_valid_trajectory(answer_data: dict) -> bool:
-    """Must have at least one tool call in the trajectory."""
-    answer = answer_data.get("answer", {})
-    if not isinstance(answer,dict):
+    """
+    Quality filter using actual ToolBench file structure:
+      answer_generation.train_messages — tool call sequence
+      answer_generation.finish_type    — outcome
+      answer_generation.final_answer   — final response text
+    """
+    ag = answer_data.get("answer_generation", {})
+    if not isinstance(ag, dict):
         return False
-    train_messages = answer.get("train_messages", [])
+
+    train_messages = ag.get("train_messages", [])
+    has_tool_call = False
+    has_tool_result = False
+
     for turn in train_messages:
-        if not isinstance(turn,list):
+        if not isinstance(turn, list):
             turn = [turn]
         for msg in turn:
-            if isinstance(msg,dict) and msg.get("role") == "tool":
-                return True
-    return False
+            if not isinstance(msg, dict):
+                continue
+            role = msg.get("role", "")
+            if role == "assistant":
+                # OpenAI function calling format: tool call is in function_call field
+                if msg.get("function_call"):
+                    has_tool_call = True
+                else:
+                    # fallback: check content for JSON tool call pattern
+                    c = msg.get("content", "") or ""
+                    if '"name"' in c and '"arguments"' in c:
+                        has_tool_call = True
+            elif role in ("tool", "function", "observation"):
+                result = msg.get("content", "") or ""
+                if result.strip():
+                    has_tool_result = True
+
+    if not has_tool_call:
+        return False
+
+    finish = ag.get("finish_type", "")
+    if finish == "give_answer" and not has_tool_result:
+        return False
+
+    if finish == "give_answer":
+        final = ag.get("final_answer", "") or ""
+        if len(final.strip()) < 10:
+            return False
+
+    return True
+
+
+def extract_dfsdt_branches(raw: dict, query_id: str, query: str,
+                            category: str, group: str) -> list[dict]:
+    """
+    Extract all explored branches from a ToolBench DFSDT answer file.
+
+    ToolBench DFSDT explores multiple tool-use paths per query. Each file
+    contains the winning path AND failed/abandoned branches. We extract these
+    as additional trajectories for the same query, giving query-matched
+    expert vs suboptimal pairs. This is a stronger approximation of Z(theta)
+    in MaxEnt IRL than a global cross-query pool, because the contrastive
+    signal is within the same task context.
+
+    The main path gets pass_rate from finish_type. Alternative stored paths
+    get pass_rate=0.0. Full tree traversal would require the original DFSDT
+    code; this captures the main contrast without that dependency.
+    """
+    answer = raw.get("answer_generation", {})
+    if not isinstance(answer, dict):
+        return []
+
+    api_list = raw.get("api_list", []) or raw.get("available_tools", [])
+    pr = 1.0 if answer.get("finish_type") == "give_answer" else 0.0
+
+    branches = [{
+        "id": query_id,
+        "query": query,
+        "category": category or "unknown",
+        "group": group,
+        "pass_rate": pr,
+        "answer": answer,
+        "api_list": api_list,
+        "branch_type": "main",
+    }]
+
+    #Extract any explicitly stored alternative/failed paths
+    for key in ("failed_paths", "alternative_paths", "explored_nodes"):
+        alts = raw.get(key, [])
+        if not isinstance(alts, list):
+            continue
+        for i, alt in enumerate(alts):
+            if not isinstance(alt, dict):
+                continue
+            alt_answer = alt if "train_messages" in alt else {
+                "train_messages": alt.get("messages", []),
+                "finish_type": "give_up_and_restart",
+            }
+            branches.append({
+                "id": f"{query_id}_branch_{i}",
+                "query": query,
+                "category": category or "unknown",
+                "group": group,
+                "pass_rate": 0.0,
+                "answer": alt_answer,
+                "api_list": api_list,
+                "branch_type": "alternative",
+            })
+
+    return branches
 
 
 def load_from_local(data_root: Path, group: str, categories: list[str], target_expert: int, target_held_out: int, target_suboptimal: int, threshold: float):
@@ -79,7 +184,7 @@ def load_from_local(data_root: Path, group: str, categories: list[str], target_e
     by_category = defaultdict(int)
 
     print(f"Going through answer_dir={answer_dir} ...")
-    json_files = list(answer_dir.rglob("*_DFS_woFilter_w2.json"))
+    json_files = list(answer_dir.rglob("*_DFS_woFilter_w2.json")) or list(answer_dir.rglob("*_ChatGPT_DFS_woFilter_w2.json"))
     random.shuffle(json_files)#for random sampling
 
     for fpath in json_files:
@@ -115,31 +220,41 @@ def load_from_local(data_root: Path, group: str, categories: list[str], target_e
                     category = part
                     break
 
-        query_id = fpath.stem.split("_")[0]
-        query = raw.get("query", "") or query_map.get(query_id, "")
+        query_id = fpath.stem.split("_")[0]  # works for both "10001_DFS..." and "10001_ChatGPT_DFS..."
+        # query lives in answer_generation in this ToolBench version
+        ag = raw.get("answer_generation", {})
+        query = (ag.get("query", "") or raw.get("query", "") or query_map.get(query_id, ""))
+        # api_list is in forward_args.answer in some versions
+        api_list = raw.get("api_list", []) or raw.get("available_tools", [])
+        if not api_list:
+            fa = raw.get("forward_args", {})
+            api_list = fa.get("api_list", []) if isinstance(fa, dict) else []
 
         pr = compute_pass_rate(raw)
-        traj = {"id": query_id,
-                "query": query,
-                "category": category or "unknown",
-                "group": group,
-                "pass_rate": pr,
-                "answer": raw.get("answer", {}),
-                "api_list": api_list
-                }
         by_category[category] += 1
 
-        if pr>= threshold:
+        # Extract all DFSDT branches for this query — used as model
+        # distribution for IRL (query-matched expert vs suboptimal pairs)
+        raw_with_ag = {**raw, "answer_generation": ag}  # normalise for downstream
+        branches = extract_dfsdt_branches(raw_with_ag, query_id, query, category, group)
+        main_traj = branches[0]  # the final answer path
+
+        if pr >= threshold:
             if not exp_done:
-                expert.append(traj)
+                expert.append(main_traj)
             if not held_done:
-                held_out.append(traj)
+                held_out.append(main_traj)
         else:
             if not sub_done:
-                suboptimal.append(traj)
-            # Also add some suboptimal to held-out for quality variety
+                suboptimal.append(main_traj)
             if not held_done and random.random() < 0.3:
-                held_out.append(traj)
+                held_out.append(main_traj)
+
+        #Store all branches (main + alternatives) for DFSDT-based IRL pool
+        #Alternative branches always go to suboptimal regardless of threshold
+        for branch in branches[1:]:
+            if not sub_done:
+                suboptimal.append(branch)
 
         if total_seen % 1000 == 0:
             print(f"Seen={total_seen}; Valid={total_valid};\nExpert count={len(expert)}, Held-out count={len(held_out)}, Suboptimal count={len(suboptimal)};\nBy category={dict(by_category)}")
