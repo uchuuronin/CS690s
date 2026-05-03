@@ -12,7 +12,7 @@ import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from peft import PeftModel
 import sys
-sys.path.insert(0, str(Path(__file__).parent / "pipeline"))
+sys.path.insert(0, str(Path(__file__).parent))
 from config import DATA_DIR, OUTPUT_DIR, MODELS_DIR, BASE_MODEL, FEATURE_NAMES, QUALITY_FEATURE_IDX
 from feature_extraction import compute_features, load_tool_schemas
 

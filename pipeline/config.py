@@ -33,7 +33,8 @@ IRL_LOG_EVERY = 50
 IRL_PAIR_DELTA = 0.15
 TOOLBENCH_GROUP = "G1"
 
-BASE_MODEL = "Qwen/Qwen2.5-32B-Instruct"
+_LOCAL_MODEL = Path("/workspace/models/Qwen2.5-32B-Instruct")
+BASE_MODEL = str(_LOCAL_MODEL) if _LOCAL_MODEL.exists() else "Qwen/Qwen2.5-32B-Instruct"
 MAX_SEQ_LEN = 1024
 LORA_R = 16
 LORA_ALPHA = 32
@@ -46,6 +47,7 @@ SFT_ARGS = {"num_train_epochs": 3,
             "learning_rate": 2e-4,
             "warmup_ratio": 0.05,
             "lr_scheduler_type": "cosine",
+            "gradient_checkpointing": True,
             "logging_steps": 10,
             "save_steps": 100,
             "bf16": True,
@@ -54,6 +56,7 @@ SFT_ARGS = {"num_train_epochs": 3,
 GRPO_ARGS = {"num_train_epochs": 2,
              "per_device_train_batch_size": 1,
              "gradient_accumulation_steps": 8,
+             "gradient_checkpointing": True,
              "learning_rate": 1e-4,
              "warmup_ratio": 0.05,
              "lr_scheduler_type": "cosine",
