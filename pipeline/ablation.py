@@ -7,27 +7,26 @@ Three analyses
 
 import json
 from pathlib import Path
-
 import numpy as np
 from scipy import stats
-
 import sys
 sys.path.insert(0, str(Path(__file__).parent))
 from config import (
-    DATA_DIR, OUTPUT_DIR,
-    FEATURE_NAMES, N_FEATURES, QUALITY_FEATURE_IDX, DECOY_FEATURE_IDX,
-    IRL_LR, IRL_L2, IRL_ITERS, IRL_PAIR_DELTA,
+    DATA_DIR, OUTPUT_DIR, FEATURE_NAMES, N_FEATURES, QUALITY_FEATURE_IDX, 
+    DECOY_FEATURE_IDX, IRL_LR, IRL_L2, IRL_ITERS, IRL_PAIR_DELTA,
 )
 from maxent_irl import (
     _load, load_suboptimal, fit_scaler, standardise, unstandardise_theta,
     pool_importance_weights, _softmax_weighted, maxent_irl, pairwise_ranking_check,
 )
-
+import warnings
+import os
+os.environ["TRANSFORMERS_VERBOSITY"] = "error"
+warnings.filterwarnings("ignore")
 OUTPUT_DIR.mkdir(exist_ok=True)
 
 
-def run_irl_subset(expert_feat: np.ndarray, model_feat: np.ndarray,
-                   active_cols: list[int]) -> np.ndarray:
+def run_irl_subset(expert_feat: np.ndarray, model_feat: np.ndarray, active_cols: list[int]) -> np.ndarray:
     """Run MaxEnt IRL on a column subset. Returns theta in original (full) feature space."""
     exp_sub = expert_feat[:, active_cols]
     mod_sub = model_feat[:, active_cols]
@@ -53,13 +52,12 @@ def run_irl_subset(expert_feat: np.ndarray, model_feat: np.ndarray,
         theta_sub = theta_sub + IRL_LR * grad
 
     # map back to original scale
-    theta_orig_sub = theta_sub / sigma
+    theta_orig_sub = theta_sub/sigma
 
     # embed into full N_FEATURES vector (zeros for dropped features)
     theta_full = np.zeros(N_FEATURES)
     for out_idx, orig_idx in enumerate(active_cols):
         theta_full[orig_idx] = theta_orig_sub[out_idx]
-
     return theta_full
 
 
@@ -110,7 +108,6 @@ def leave_one_out_ablation(expert_feat: np.ndarray, model_feat: np.ndarray) -> d
 
 def decoy_stability_check(expert_feat: np.ndarray, model_feat: np.ndarray) -> dict:
     print("decoy stability check...")
-
     theta_full = run_irl_subset(expert_feat, model_feat, list(range(N_FEATURES)))
     theta_no_decoy = run_irl_subset(expert_feat, model_feat, QUALITY_FEATURE_IDX)
 
@@ -166,7 +163,6 @@ def interpret_theta_comparison() -> dict:
                 "bt_rank": bt_rank[name] + 1,
                 "rank_diff": rank_diff,
             })
-
     disagreements.sort(key=lambda x: x["rank_diff"], reverse=True)
 
     return {

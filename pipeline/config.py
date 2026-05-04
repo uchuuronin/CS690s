@@ -66,7 +66,7 @@ GRPO_ARGS = {"num_train_epochs": 2,
              "report_to": "none",
              "num_generations": 4,
              "beta": 0.04,
-             "max_new_tokens": 512,
+             "max_new_tokens": 2048,
 }
 
 TOOLRL_WEIGHTS = {"outcome": 0.4,

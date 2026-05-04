@@ -23,7 +23,9 @@ from config import (
     LORA_R, LORA_ALPHA, LORA_TARGET_MODULES,
     GRPO_ARGS, TOOLRL_WEIGHTS, IRL_REWARD_CLIP,
 )
-
+import logging
+logging.getLogger("transformers.models.qwen2.modeling_qwen2").setLevel(logging.ERROR)
+logging.getLogger("transformers").setLevel(logging.ERROR)
 SYSTEM_PROMPT = """You are a tool-using AI assistant. Given a query, you must:
 1. Decide which tool to call and what arguments to use.
 2. Use the tool result to answer the query.
