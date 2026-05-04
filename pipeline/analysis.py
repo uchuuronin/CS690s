@@ -60,14 +60,14 @@ def parse_completion(query: str, completion: str) -> dict:
         "api_list": [],
     }
 
-def run_inference(model_dir: Path, queries: list[str], max_new_tokens: int = 512) -> list[str]:
+def run_inference(model_dir: Path, queries: list[str], max_new_tokens: int = 2048) -> list[str]:
     print(f"loading {model_dir.name}...")
     tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL)
     tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "left"
 
     base = AutoModelForCausalLM.from_pretrained(
-        BASE_MODEL, dtype=torch.bfloat16, device_map="auto"
+        BASE_MODEL, torch_dtype=torch.bfloat16, device_map="auto"
     )
     adapter_config = model_dir / "adapter_config.json"
     if adapter_config.exists():
