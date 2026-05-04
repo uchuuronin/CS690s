@@ -1,4 +1,4 @@
-# Learning What Users Actually Want: Reward Learning for Tool-Use Agents via IRL
+# Learning What Users Actually Want: Reward Learning for Tool-Use Agents via Inverse RL
 
 CS 690S Final Project. Recovers implicit tool-use reward functions via Maximum Entropy IRL from ToolBench expert demonstrations, then trains an LLM agent via GRPO against the learned reward.
 
