@@ -2,12 +2,10 @@
 GRPO training for all three reward-conditioned agents.
 All conditions use identical hyperparameters for a fair comparison.
 """
-
 import argparse
 import json
 import re
 from pathlib import Path
-
 import numpy as np
 import torch
 from datasets import Dataset
@@ -15,7 +13,7 @@ from importlib.util import spec_from_file_location, module_from_spec
 from peft import LoraConfig
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from trl import GRPOConfig, GRPOTrainer
-
+import logging
 import sys
 sys.path.insert(0, str(Path(__file__).parent))
 from config import (
@@ -23,7 +21,6 @@ from config import (
     LORA_R, LORA_ALPHA, LORA_TARGET_MODULES,
     GRPO_ARGS, TOOLRL_WEIGHTS, IRL_REWARD_CLIP,
 )
-import logging
 logging.getLogger("transformers.models.qwen2.modeling_qwen2").setLevel(logging.ERROR)
 logging.getLogger("transformers").setLevel(logging.ERROR)
 SYSTEM_PROMPT = """You are a tool-using AI assistant. Given a query, you must:
@@ -36,12 +33,17 @@ Respond in this format:
 [TOOL_RESULT] (tool output will appear here)
 [ANSWER] your final answer"""
 
-_BAD_TOOL_NAMES = ["placeholder", "tool_name", "example"]
+_BAD_TOOL_NAMES = {"placeholder", "tool_name", "example"}
+_TOOL_CALL_RE = re.compile(
+    r"\[TOOL_CALL\]\s+(\w+)\((.+?)\)(?=\s*\[|\s*$)",
+    re.DOTALL,
+)
 
+def _is_bad_tool_name(name: str) -> bool:
+    return name.strip().lower() in _BAD_TOOL_NAMES
 
 def format_prompt(traj: dict) -> str:
     return f"{SYSTEM_PROMPT}\n\n[QUERY] {traj['query']}"
-
 
 def _load_feature_module():
     spec = spec_from_file_location("feature_extraction", Path(__file__).parent / "feature_extraction.py")
@@ -49,16 +51,15 @@ def _load_feature_module():
     spec.loader.exec_module(mod)
     return mod
 
-
 def parse_completion_to_pseudo_traj(prompt: str, completion: str) -> dict:
     query_match = re.search(r"\[QUERY\]\s*(.*?)(?:\n|$)", prompt)
     query = query_match.group(1).strip() if query_match else ""
     steps = []
     step_idx = 0
 
-    for m in re.finditer(r"\[TOOL_CALL\]\s+(\w+)\((.+?)\)(?=\s*\[|\s*$)", completion, re.DOTALL):
+    for m in _TOOL_CALL_RE.finditer(completion):
         name = m.group(1).strip()
-        if any(bad in name.lower() for bad in _BAD_TOOL_NAMES):
+        if _is_bad_tool_name(name):
             continue
         try:
             args = json.loads(m.group(2).strip())
@@ -67,15 +68,13 @@ def parse_completion_to_pseudo_traj(prompt: str, completion: str) -> dict:
         except Exception:
             args = {kv.group(1): kv.group(2)
                     for kv in re.finditer(r'"(\w+)"\s*:\s*"([^"]*)"', m.group(2))}
-        steps.append({"step_idx": step_idx, "role": "assistant",
-                      "tool_name": name, "tool_args": args, "tool_output": None})
+        steps.append({"step_idx": step_idx, "role": "assistant", "tool_name": name, "tool_args": args, "tool_output": None})
         step_idx += 1
 
     for m in re.finditer(r"\[TOOL_RESULT\]\s*(.*?)(?=\[TOOL_CALL\]|\[ANSWER\]|$)", completion, re.DOTALL):
         output = m.group(1).strip()
         if output:
-            steps.append({"step_idx": step_idx, "role": "tool",
-                          "tool_name": None, "tool_args": None, "tool_output": output[:300]})
+            steps.append({"step_idx": step_idx, "role": "tool", "tool_name": None, "tool_args": None, "tool_output": output[:300]})
             step_idx += 1
     answer_match = re.search(r"\[ANSWER\]\s*(.*?)$", completion, re.DOTALL)
     final_answer = answer_match.group(1).strip() if answer_match else None
@@ -103,14 +102,14 @@ def make_toolrl_reward_fn():
         rewards = []
         for completion in completions:
             text = completion if isinstance(completion, str) else completion[0].get("content", "")
-            tool_calls = re.findall(r"\[TOOL_CALL\]\s+(\w+)\((.*?)\)", text, re.DOTALL)
+            tool_calls = [(m.group(1), m.group(2)) for m in _TOOL_CALL_RE.finditer(text) if not _is_bad_tool_name(m.group(1))]
             has_answer = "[ANSWER]" in text
             if not tool_calls:
                 rewards.append(w["outcome"] * (1.0 if has_answer else 0.0))
                 continue
             name_scores, schema_scores, value_scores = [], [], []
             for name, args_str in tool_calls:
-                name_scores.append(0.0 if any(b in name.lower() for b in _BAD_TOOL_NAMES) else 1.0)
+                name_scores.append(1.0)  # bad names already filtered above
                 try:
                     args = json.loads(args_str)
                     valid = isinstance(args, dict) and len(args) > 0
@@ -134,7 +133,11 @@ def make_irl_reward_fn(theta: np.ndarray):
     compute_features = _load_feature_module().compute_features
 
     def reward_fn(completions, **kwargs):
-        prompts = kwargs.get("prompts", [""] * len(completions))
+        prompts = kwargs.get("prompts") or kwargs.get("prompt") or [""] * len(completions)
+        if isinstance(prompts, str):
+            prompts = [prompts] * len(completions)
+        if not any(p for p in prompts):
+            print("WARNING: empty prompts in IRL reward fn, kwargs keys:", list(kwargs.keys()))
         rewards = []
         for prompt, completion in zip(prompts, completions):
             text = completion if isinstance(completion, str) else completion[0].get("content", "")
@@ -147,6 +150,8 @@ def make_irl_reward_fn(theta: np.ndarray):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--condition", choices=["binary", "toolrl", "irl"], default="binary")
+
+    parser.add_argument("--init-from-sft", action="store_true",help="initialise GRPO from MODELS_DIR/sft instead of BASE_MODEL")
     args = parser.parse_args()
     output_dir = MODELS_DIR / args.condition
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -156,7 +161,7 @@ def main():
     prompts = [format_prompt(t) for t in expert]
     print(f"condition={args.condition} training_examples={len(prompts)}")
 
-    has_gpu = torch.cuda.is_available()
+    has_gpu= torch.cuda.is_available()
     if has_gpu:
         vram_gb = torch.cuda.get_device_properties(0).total_memory / 1e9
         if vram_gb < 6:
@@ -172,9 +177,21 @@ def main():
             json.dump([{"prompt": p, "traj_id": t["id"]} for p, t in zip(prompts, expert)], f)
         return
 
-    tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL)
+    sft_dir = MODELS_DIR / "sft"
+    if args.init_from_sft and sft_dir.exists():
+        init_model_path = str(sft_dir)
+        print(f"initialising GRPO from SFT checkpoint: {init_model_path}")
+    else:
+        init_model_path = BASE_MODEL
+        if args.init_from_sft:
+            print(f"WARNING: --init-from-sft given but {sft_dir} not found, falling back to {BASE_MODEL}")
+        else:
+            print(f"initialising GRPO from base model: {BASE_MODEL}")
+
+    tokenizer= AutoTokenizer.from_pretrained(init_model_path)
     tokenizer.pad_token = tokenizer.eos_token
-    model = AutoModelForCausalLM.from_pretrained(BASE_MODEL, torch_dtype=torch.bfloat16, device_map="auto")
+    model= AutoModelForCausalLM.from_pretrained(init_model_path, torch_dtype=torch.bfloat16, device_map="auto")
+
     if args.condition == "binary":
         reward_fn = make_binary_reward_fn()
     elif args.condition == "toolrl":
@@ -195,8 +212,7 @@ def main():
         reward_funcs=[reward_fn],
         args=grpo_config,
         train_dataset=Dataset.from_list([{"prompt": p} for p in prompts]),
-        peft_config=LoraConfig(r=LORA_R, lora_alpha=LORA_ALPHA,
-                               target_modules=LORA_TARGET_MODULES, task_type="CAUSAL_LM"),
+        peft_config=LoraConfig(r=LORA_R, lora_alpha=LORA_ALPHA, target_modules=LORA_TARGET_MODULES, task_type="CAUSAL_LM"),
     )
 
     print(f"starting GRPO training ({args.condition})...")
